@@ -1,0 +1,64 @@
+{
+  "name": "unreal-class-creator",
+  "displayName": "Unreal Class Creator",
+  "description": "Adds new C++ classes for Unreal Engine via a custom UI",
+  "version": "0.0.1",
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Unreal Class Creator",
+      "properties": {
+        "unrealClassCreator.defaultBuildTask": {
+          "type": "string",
+          "default": "",
+          "description": "The default task to run after creating a class."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "unreal-class-creator",
+          "title": "New Unreal C++ Class",
+          "icon": "resources/unreal.svg"
+        }
+      ]
+    },
+    "views": {
+      "unreal-class-creator": [
+        {
+          "icon": "resources/unreal.svg",
+          "type": "webview",
+          "id": "unrealClassCreatorPanel",
+          "name": ""
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "unreal.createClass",
+        "title": "Create New Unreal Class"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^4.9.4"
+  }
+}
