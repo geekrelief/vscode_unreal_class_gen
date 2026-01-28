@@ -3,6 +3,7 @@
   "displayName": "Unreal Class Creator",
   "description": "Adds new C++ classes for Unreal Engine via a custom UI",
   "version": "1.0.0",
+  "publisher": "geekrelief",
   "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.74.0"
