@@ -2,7 +2,7 @@
   "name": "unreal-class-creator",
   "displayName": "Unreal Class Creator",
   "description": "Adds new C++ classes for Unreal Engine via a custom UI",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "geekrelief",
   "icon": "resources/icon.png",
   "repository": { 
