@@ -154,13 +154,27 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { padding: 10px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 5px; }
-        button { cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 8px 12px; width: 100%; margin-top: 10px; }
+        body { padding: 12px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.4; }
+        .input-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 5px; font-weight: normal; color: var(--vscode-input-foreground); opacity: 0.9;}
+
+        input { 
+            width: 100%; 
+            box-sizing: border-box; 
+            background: var(--vscode-input-background); 
+            color: var(--vscode-input-foreground); 
+            border: 1px solid var(--vscode-input-border, transparent); 
+            padding: 4px 6px; 
+            outline-offset: -1px;
+        }
+
+        /* Native-style focus border */
+        input:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+
+        input::selection { background-color: var(--vscode-selection-background) !important; }
+        button { cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 12px; width: 100%; margin-top: 10px; }
         button:hover { background: var(--vscode-button-hoverBackground); }
-        .row { display: flex; gap: 5px; }
+        .row { display: flex; gap: 4px; }
         #browseBtn { width: auto; margin-top: 0; }
         .footer-row {
             display: flex;
@@ -188,7 +202,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
         .strikethrough {
             text-decoration: line-through;
-            opacity: 0.6; /* Optional: dims the text slightly for a better visual "disabled" look */
+            opacity: 0.5; /* Optional: dims the text slightly for a better visual "disabled" look */
         }
     </style>
 </head>
