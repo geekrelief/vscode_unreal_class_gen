@@ -54,41 +54,48 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                     break;
 
                 case 'submitForm':
-                    const { className, parentClassName, headerPath, cppPath, headerIncludePath } = message.data;
-                    vscode.window.showInformationMessage(`Creating Unreal Class: ${className} ${parentClassName} at ${headerPath} and ${cppPath} with include path ${headerIncludePath}`);
-                    console.log(`Creating Unreal Class: ${className} Parent Class: ${parentClassName} at ${headerPath} and ${cppPath} with include path ${headerIncludePath}`);
+                    const { className, parentClassName, headerPath, cppPath, headerIncludePath, isHeaderOnly } = message.data;
 
-                    // Ensure directories exist
                     const headerDir = path.dirname(headerPath);
-                    const cppDir = path.dirname(cppPath);
                     if (!fs.existsSync(headerDir)) fs.mkdirSync(headerDir, { recursive: true });
-                    if (!fs.existsSync(cppDir)) fs.mkdirSync(cppDir, { recursive: true });
-
-                    // 3. Generate File Content
-                    if (fs.existsSync(headerPath) || fs.existsSync(cppPath)) {
-                        vscode.window.showErrorMessage(`Error: One or both files already exist. Aborting creation.`);
+                    if (fs.existsSync(headerPath)) {
+                        vscode.window.showErrorMessage(`Error: header file already exists at ${headerPath}. Aborting creation.`);
                         return;
                     }
 
                     const headerContent = this.generateHeader(className, parentClassName);
-                    const cppContent = this.generateCpp(headerIncludePath);
 
-                    // Write files
                     fs.writeFileSync(headerPath, headerContent);
-                    fs.writeFileSync(cppPath, cppContent);
+                    this.updateCompileCommandsJson(headerPath);
 
                     if (fs.existsSync(headerPath)) {
                         this.openFileInEditor(headerPath);
                     }
-                    if (fs.existsSync(cppPath)) {
-                        this.openFileInEditor(cppPath);
+
+                    if (!isHeaderOnly) { // generate the cpp file
+                        const cppDir = path.dirname(cppPath);
+                        if (!fs.existsSync(cppDir)) fs.mkdirSync(cppDir, { recursive: true });
+                        if (fs.existsSync(cppPath)) {
+                            vscode.window.showErrorMessage(`Error: cpp file already exists at ${cppPath}. Aborting creation.`);
+                            return;
+                        }
+
+                        const cppContent = this.generateCpp(headerIncludePath);
+                        fs.writeFileSync(cppPath, cppContent);
+                        this.updateCompileCommandsJson(cppPath);
+
+                        if (fs.existsSync(cppPath)) {
+                            this.openFileInEditor(cppPath);
+                        }
                     }
 
-                    this.updateCompileCommandsJson(headerPath);
-                    this.updateCompileCommandsJson(cppPath);
-
-                    // Update Intellisense (c_cpp_properties.json)
-                    //await updateIntellisense(headerDir);
+                    if (!isHeaderOnly) {
+                        vscode.window.showInformationMessage(`Creating Unreal Class: ${className} ${parentClassName} at ${headerPath} and ${cppPath} with include path ${headerIncludePath}`);
+                        console.log(`Creating Unreal Class: ${className} Parent Class: ${parentClassName} at ${headerPath} and ${cppPath} with include path ${headerIncludePath}`);
+                    } else {
+                        vscode.window.showInformationMessage(`Creating Unreal Header: ${className} ${parentClassName} at ${headerPath} (Header Only) with include path ${headerIncludePath}`);
+                        console.log(`Creating Unreal Header: ${className} Parent Class: ${parentClassName} at ${headerPath} (Header Only) with include path ${headerIncludePath}`);
+                    }
                     break;
                 case 'webviewReady':
                     this.initalizeDefaultPath(webviewView);
@@ -155,6 +162,34 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         button:hover { background: var(--vscode-button-hoverBackground); }
         .row { display: flex; gap: 5px; }
         #browseBtn { width: auto; margin-top: 0; }
+        .footer-row {
+            display: flex;
+            align-items: center; /* Vertically centers the checkbox with the button */
+            gap: 12px;           /* Adds space between the checkbox and the button */
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .checkbox-container input {
+            margin-right: 6px;   /* Space between the actual box and the label text */
+            cursor: pointer;
+        }
+
+        .strikethrough {
+            text-decoration: line-through;
+            opacity: 0.6; /* Optional: dims the text slightly for a better visual "disabled" look */
+        }
     </style>
 </head>
 <body>
@@ -193,7 +228,16 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         </div>
     </div>
 
-    <button id="createBtn">Create Unreal Class</button>
+    <!-- button id="createBtn">Create Unreal Class</button -->
+
+    <div class="footer-row">
+        <label class="checkbox-container">
+            <input type="checkbox" id="headerOnly" />
+            <span>Header Only</span>
+        </label>
+        <button id="createBtn">Create Unreal Class</button>
+    </div>
+
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
@@ -203,21 +247,31 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         const classType = document.getElementById('classType');
         const headerLocation = document.getElementById('headerLocation');
         const cppLocation = document.getElementById('cppLocation');
+        const headerOnlyCheckbox = document.getElementById('headerOnly');
 
         var defaultPath = "";
         document.getElementById('browseBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'browse' });
         });
 
+        headerOnlyCheckbox.addEventListener('change', () => {
+            if (headerOnlyCheckbox.checked) {
+                cppLocation.classList.add('strikethrough');
+            } else {
+                cppLocation.classList.remove('strikethrough');
+            }
+        });
+
         document.getElementById('createBtn').addEventListener('click', () => {
             const className = document.getElementById('className').value || "MyClass";
-            const parentClassName = document.getElementById('parentClassName').value || "UObject";
+            const parentClassName = document.getElementById('parentClassName').value;
             const headerPath = headerLocation.textContent;
             const cppPath = cppLocation.textContent;
             const headerIncludePath = headerPath.split(defaultPath)[1].replace("Public/", "");
+            const isHeaderOnly = headerOnlyCheckbox.checked;
             vscode.postMessage({
                 command: 'submitForm',
-                data: { className, parentClassName, headerPath, cppPath, headerIncludePath }
+                data: { className, parentClassName, headerPath, cppPath, headerIncludePath, isHeaderOnly }
             });
         });
 
@@ -308,7 +362,20 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 </html>`;
     }
 
-    private generateHeader(className: string, parentClassName: string, copyright: string = "Copyright notice"): string {
+    private getCopyrightSetting(): string {
+        // 1. Get the configuration object using your prefix
+        const config = vscode.workspace.getConfiguration('unrealClassCreator');
+
+        // 2. Get the specific property. 
+        // The second argument is a fallback if the setting is missing.
+        const copyright = config.get<string>('copyrightText', '');
+
+        // 3. (Optional) Replace dynamic variables like ${year}
+        const currentYear = new Date().getFullYear().toString();
+        return copyright.replace('${year}', currentYear);
+    }
+
+    private generateHeader(className: string, parentClassName: string): string {
         // Basic include mapping for common classes
         const includeMap: { [key: string]: string } = {
             'UObject': 'CoreMinimal.h',
@@ -354,9 +421,12 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         };
         
         const includeFile = includeMap[parentClassName] || `CoreMinimal.h`; // Fallback to CoreMinimal
-        const prefixedClassName = parentClassName[0] + className;
+        const prefixedClassName = parentClassName.length > 0 ? parentClassName[0] + className : '';
         const moduleAPI = this.moduleName.toUpperCase() + '_API';
-
+        const classHeaderDecl = parentClassName.length > 0 
+            ? `class ${moduleAPI} ${prefixedClassName} : public ${parentClassName}` 
+            : `class ${moduleAPI} ${className}`;
+        const copyright = this.getCopyrightSetting();
         return `// ${copyright}
 
 #pragma once
@@ -368,7 +438,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 *
 */
 UCLASS()
-class ${moduleAPI} ${prefixedClassName} : public ${parentClassName}
+${classHeaderDecl}
 {
     GENERATED_BODY()
 
@@ -376,7 +446,8 @@ class ${moduleAPI} ${prefixedClassName} : public ${parentClassName}
 `;
     }
 
-    private generateCpp(headerIncludePath: string, copyright:string = "Copyright notice"): string {
+    private generateCpp(headerIncludePath: string): string {
+        const copyright = this.getCopyrightSetting();
         return `// ${copyright}
 
 #include "${headerIncludePath}"`;

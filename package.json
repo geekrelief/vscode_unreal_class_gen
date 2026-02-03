@@ -27,6 +27,11 @@
           "type": "string",
           "default": "",
           "description": "The default task to run after creating a class."
+        },
+        "unrealClassCreator.copyrightText": {
+            "type": "string",
+            "default": "Copyright © ${year} Your Name. All rights reserved.",
+            "description": "The copyright notice to include at the top of generated files."
         }
       }
     },
