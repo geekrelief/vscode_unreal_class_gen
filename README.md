@@ -2,6 +2,8 @@
 
 A VS Code extension designed to streamline the creation of C++ classes for Unreal Engine projects. This tool automates the boilerplate process, ensuring classes are created with the correct headers, inheritance, and project-specific copyright information.
 
+It can also regenerate the project files for VSCode and Visual Studio without having to launch the editor.
+
 ## ⚙️ Configuration
 
 You can customize the extension behavior in your VS Code settings:

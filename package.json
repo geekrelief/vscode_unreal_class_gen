@@ -1,8 +1,8 @@
 {
   "name": "unreal-class-creator",
   "displayName": "Unreal Class Creator",
-  "description": "Adds new C++ classes for Unreal Engine via a custom UI",
-  "version": "1.1.1",
+  "description": "Adds new C++ classes for Unreal Engine via a custom UI and can regenerate the project without the editor.",
+  "version": "1.2.0",
   "publisher": "geekrelief",
   "icon": "resources/icon.png",
   "repository": { 
@@ -29,9 +29,19 @@
           "description": "The default task to run after creating a class."
         },
         "unrealClassCreator.copyrightText": {
-            "type": "string",
-            "default": "Copyright © ${year} Your Name. All rights reserved.",
-            "description": "The copyright notice to include at the top of generated files."
+          "type": "string",
+          "default": "Copyright © ${year} Your Name. All rights reserved.",
+          "description": "The copyright notice to include at the top of generated files."
+        },
+        "unrealClassCreator.enginePath": {
+          "type": "string",
+          "default": "",
+          "description": "The full path to Unreal Engine."
+        },
+        "unrealClassCreator.projectType": {
+          "type": "string",
+          "default": "VSCode",
+          "description": "The type of project to generate (VisualStudio solution, VSCode workspace)."
         }
       }
     },
@@ -58,6 +68,10 @@
       {
         "command": "unreal.createClass",
         "title": "Create New Unreal Class"
+      },
+      {
+        "command": "unreal.showMenu",
+        "title": "Show Configuration Menu"
       }
     ]
   },

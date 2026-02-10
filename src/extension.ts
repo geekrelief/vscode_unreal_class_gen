@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import {spawn} from 'child_process';
+
+const extensionID:string = "unrealClassCreator";
+//let myStatusBarItem: vscode.StatusBarItem;
+//var enginePath: string = vscode.workspace.getConfiguration(extensionID).get<string>('enginePath', '');
 
 export function activate(context: vscode.ExtensionContext) {
     // The ID must match the one in your package.json: "unrealClassCreatorPanel"
@@ -9,7 +14,15 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('unrealClassCreatorPanel', provider)
     );
+
 }
+
+type ProjectType = "vscode" | "vs2026";
+
+const UnrealBuildToolProjectTypeArg: Record<ProjectType, string> = {
+    "vscode":"-VSCode",
+    "vs2026":"-ProjectFileFormat=VisualStudio2026"
+};
 
 interface CompileCommand {
     file: string;
@@ -21,7 +34,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     constructor(private readonly _extensionUri: vscode.Uri) {}
 
     moduleName: string = "MYMODULE";
-    defaultPath: string = "";
+    rootSourcePath: string = "";
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -37,23 +50,23 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
-                case 'browse':
+                case 'browseFilePath':
                     const folderUri = await vscode.window.showOpenDialog({
                         canSelectFolders: true,
                         canSelectFiles: false,
                         openLabel: 'Select Folder',
-                        defaultUri: vscode.Uri.file(this.defaultPath)
+                        defaultUri: vscode.Uri.file(this.rootSourcePath)
                     });
                     if (folderUri && folderUri[0]) {
-                        this.defaultPath = folderUri[0].fsPath.replaceAll('\\', '/');
+                        this.rootSourcePath = folderUri[0].fsPath.replaceAll('\\', '/');
                         webviewView.webview.postMessage({ 
                             command: 'setPath', 
-                            value: this.defaultPath
+                            value: this.rootSourcePath
                         });
                     }
                     break;
 
-                case 'submitForm':
+                case 'createFiles':
                     const { className, parentClassName, headerPath, cppPath, headerIncludePath, isHeaderOnly } = message.data;
 
                     const headerDir = path.dirname(headerPath);
@@ -97,6 +110,19 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                         console.log(`Creating Unreal Header: ${className} Parent Class: ${parentClassName} at ${headerPath} (Header Only) with include path ${headerIncludePath}`);
                     }
                     break;
+
+                case 'browseEnginePath':
+                    this.browseEnginePath(webviewView);
+                    break;
+
+                case 'updateProjectType':
+                    vscode.workspace.getConfiguration(extensionID).update('projectType', message.data);
+                    break;
+
+                case 'generateProject':
+                    this.generateProject(webviewView);
+                    break;
+
                 case 'webviewReady':
                     this.initalizeDefaultPath(webviewView);
                     break;
@@ -107,42 +133,70 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     private getRootPath(): string {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (workspaceFolders && workspaceFolders.length > 0) {
-            return workspaceFolders[0].uri.fsPath;
+            return workspaceFolders[0].uri.fsPath.replaceAll('\\', '/')
         }
         return "";
+    }
+
+    private async findProjectFilePath(): Promise<string | undefined> {
+        try{ 
+            const files = await fs.promises.readdir(this.getRootPath());
+            const uprojectFilename = files.find(f => f.endsWith('.uproject'));
+            if (uprojectFilename){
+                return path.join(this.getRootPath(), uprojectFilename);
+            }
+            else
+            {
+                vscode.window.showErrorMessage(`Could not find .uproject in ${this.getRootPath()}`);
+            }
+        } catch(error) {
+            vscode.window.showErrorMessage(`An error occured while try to find .uproject in ${this.getRootPath()}: ${error}`);
+            return undefined;
+        }
     }
 
     private async initalizeDefaultPath(webviewView: vscode.WebviewView) {
         // Get the current workspace folder
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (workspaceFolders) {
-            this.defaultPath = this.getRootPath();
+            this.rootSourcePath = this.getRootPath();
             try {
                 // 1. Get all files in root to find .uproject
-                const files = await fs.promises.readdir(this.defaultPath);
-                const uprojectFile = files.find(f => f.endsWith('.uproject'));
+                const uprojectFile = await this.findProjectFilePath();
 
                 if (uprojectFile) {
+
                     this.moduleName = path.basename(uprojectFile, '.uproject');
                     // 2. Construct the path to Source/ProjectName
-                    this.defaultPath = path.join(this.defaultPath, 'Source', this.moduleName, '').replaceAll('\\', '/');
-                    this.defaultPath = (this.defaultPath + '/').replace(/\/+/g, '/');
+                    this.rootSourcePath = path.join(this.rootSourcePath, 'Source', this.moduleName, '').replaceAll('\\', '/');
+                    this.rootSourcePath = (this.rootSourcePath + '/').replace(/\/+/g, '/');
 
                     // 3. Verify the Source subfolder exists
-                    if (!fs.existsSync(this.defaultPath)) {
-                        console.error("Could not find Source subfolder", this.defaultPath);
+                    if (!fs.existsSync(this.rootSourcePath)) {
+                        console.error("Could not find Source subfolder", this.rootSourcePath);
+                        vscode.window.showErrorMessage(`Could not find Source subfolder ${this.rootSourcePath}`);
                     }
                 }
                 else
                 {
-                    console.error("Could not find uproject in workspace", this.defaultPath);
+                    console.error("Could not find uproject in workspace", this.rootSourcePath);
+                    vscode.window.showErrorMessage(`Could not find uproject in workspace ${this.rootSourcePath}`);
                 }
             } catch (err) {
                 console.error("Error searching workspace:", err);
+                vscode.window.showErrorMessage(`Error searching workspace: ${err}`);
             }
 
-            webviewView.webview.postMessage({ command: 'initializeDefaultPath', value: this.defaultPath });
+            webviewView.webview.postMessage({ command: 'initializeDefaultPath', value: this.rootSourcePath });
         }
+
+        let config = vscode.workspace.getConfiguration(extensionID)
+
+        const projectType: string = config.get<string>('projectType', '');
+        webviewView.webview.postMessage({command: 'initializeProjectType', value: projectType });
+
+        var enginePath: string = config.get<string>('enginePath', '');
+        webviewView.webview.postMessage({command: 'initializeEnginePath', value: enginePath });
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
@@ -169,13 +223,23 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         }
 
         /* Native-style focus border */
+        .form-section {
+            margin-top: 25px; 
+            padding: 10px; 
+            border: 1px solid #cccccc1f;
+            border-radius: 4px;
+        }
+
         input:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
 
         input::selection { background-color: var(--vscode-selection-background) !important; }
         button { cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 12px; width: 100%; margin-top: 10px; }
         button:hover { background: var(--vscode-button-hoverBackground); }
         .row { display: flex; gap: 4px; }
-        #browseBtn { width: auto; margin-top: 0; }
+        #browseFilePathBtn, #browseEnginePathBtn { width: auto; margin-top: 0; }
+        .gen-button { 
+            border: 1px solid var(--vscode-button-border, #cccccc1f);
+        }
         .footer-row {
             display: flex;
             align-items: center; /* Vertically centers the checkbox with the button */
@@ -207,51 +271,72 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     </style>
 </head>
 <body>
-    <div class="input-group">
-        <label>Class Type</label>
-        <select id="classType">
-            <option value="root">Root</option>
-            <option value="public" selected>Public</option>
-            <option value="private">Private</option>
-        </select>
-    </div>
+    <div class="form-section">
+        <div class="input-group">
+            <label>Class Type</label>
+            <select id="classType">
+                <option value="root">Root</option>
+                <option value="public" selected>Public</option>
+                <option value="private">Private</option>
+            </select>
+        </div>
 
-    <div class="input-group">
-        <label>Class Name</label>
-        <input type="text" id="className" placeholder="e.g. MyClass">
-    </div>
+        <div class="input-group">
+            <label>Class Name</label>
+            <input type="text" id="className" placeholder="e.g. MyClass">
+        </div>
 
-    <div class="input-group">
-        <label>Parent Class</label>
-        <input type="text" id="parentClassName" placeholder="e.g. UObject">
-    </div>
+        <div class="input-group">
+            <label>Parent Class</label>
+            <input type="text" id="parentClassName" placeholder="e.g. UObject">
+        </div>
 
-    <div class="input-group">
-        <label>Storage Location</label>
-        <div class="row">
-            <input type="text" id="pathInput" placeholder="Select folder...">
-            <button id="browseBtn">Browse</button>
+        <div class="input-group">
+            <label>Storage Location</label>
+            <div class="row">
+                <input type="text" id="pathInput" placeholder="Select folder...">
+                <button id="browseFilePathBtn">Browse</button>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>Preview</label>
+            <div style="font-size: 0.8em; opacity: 0.8;">
+                Header: <span id="headerLocation">...</span><br>
+                Source: <span id="cppLocation">...</span>
+            </div>
+        </div>
+
+        <div class="footer-row">
+            <label class="checkbox-container">
+                <input type="checkbox" id="headerOnly" />
+                <span>Header Only</span>
+            </label>
+            <button class="gen-button" id="createFilesBtn">Create Unreal Class</button>
         </div>
     </div>
 
-    <div class="input-group">
-        <label>Preview</label>
-        <div style="font-size: 0.8em; opacity: 0.8;">
-            Header: <span id="headerLocation">...</span><br>
-            Source: <span id="cppLocation">...</span>
+    <div class="form-section">
+        <div class="input-group">
+            <label>Engine Location</label>
+            <div class="row">
+                <input type="text" id="enginePathInput" placeholder="Select Unreal Engine folder...">
+                <button id="browseEnginePathBtn">Browse</button>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>IDE</label>
+            <select id="projectType">
+                <option value="vscode">VSCode</option>
+                <option value="vs2026">VisualStudio 2026</option>
+            </select>
+        </div>
+
+        <div class="footer-row">
+            <button class="gen-button" id="generateProjectBtn">Generate Unreal Project</button>
         </div>
     </div>
-
-    <!-- button id="createBtn">Create Unreal Class</button -->
-
-    <div class="footer-row">
-        <label class="checkbox-container">
-            <input type="checkbox" id="headerOnly" />
-            <span>Header Only</span>
-        </label>
-        <button id="createBtn">Create Unreal Class</button>
-    </div>
-
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
@@ -262,10 +347,12 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         const headerLocation = document.getElementById('headerLocation');
         const cppLocation = document.getElementById('cppLocation');
         const headerOnlyCheckbox = document.getElementById('headerOnly');
+        const enginePath = document.getElementById('enginePathInput');
+        const projectType = document.getElementById('projectType');
 
-        var defaultPath = "";
-        document.getElementById('browseBtn').addEventListener('click', () => {
-            vscode.postMessage({ command: 'browse' });
+        var rootSourcePath = "";
+        document.getElementById('browseFilePathBtn').addEventListener('click', () => {
+            vscode.postMessage({ command: 'browseFilePath' });
         });
 
         headerOnlyCheckbox.addEventListener('change', () => {
@@ -276,15 +363,15 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        document.getElementById('createBtn').addEventListener('click', () => {
+        document.getElementById('createFilesBtn').addEventListener('click', () => {
             const className = document.getElementById('className').value || "MyClass";
             const parentClassName = document.getElementById('parentClassName').value;
             const headerPath = headerLocation.textContent;
             const cppPath = cppLocation.textContent;
-            const headerIncludePath = headerPath.split(defaultPath)[1].replace("Public/", "");
+            const headerIncludePath = headerPath.split(rootSourcePath)[1].replace("Public/", "");
             const isHeaderOnly = headerOnlyCheckbox.checked;
             vscode.postMessage({
-                command: 'submitForm',
+                command: 'createFiles',
                 data: { className, parentClassName, headerPath, cppPath, headerIncludePath, isHeaderOnly }
             });
         });
@@ -297,18 +384,24 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             }
             else if (message.command === 'initializeDefaultPath') {
                 document.getElementById('pathInput').value = message.value;
-                defaultPath = message.value;
+                rootSourcePath = message.value;
                 updatePreviews();
+            }
+            else if (message.command === 'setEnginePath' || message.command === 'initializeEnginePath') {
+                enginePathInput.value = message.value;
+            }
+            else if (message.command === 'initializeProjectType') {
+                projectType.value = message.value;
             }
         });
 
         function updatePreviews() {
-            const base = pathInput.value || defaultPath;
+            const base = pathInput.value || rootSourcePath;
             const name = classNameInput.value || "MyClass";
 
-            if (base === defaultPath || (base + '/') === defaultPath || base.startsWith(defaultPath +"Public/") || base.startsWith(defaultPath + "Public")){
+            if (base === rootSourcePath || (base + '/') === rootSourcePath || base.startsWith(rootSourcePath +"Public/") || base.startsWith(rootSourcePath + "Public")){
                 classType.value = "public";
-            } else if (base.startsWith(defaultPath + "Private/") || base.startsWith(defaultPath + "Private")){
+            } else if (base.startsWith(rootSourcePath + "Private/") || base.startsWith(rootSourcePath + "Private")){
                 classType.value = "private";
             } else {
                 classType.value = "root";
@@ -350,14 +443,14 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
         function updateClassType(){
             const base = pathInput.value;
-            var ending = base.split(defaultPath)[1] || "";
+            var ending = base.split(rootSourcePath)[1] || "";
             ending = ending.replace("Public/", "").replace("Private/", "");
 
             if (classType.value === 'public') {
-                pathInput.value = (defaultPath + "/Public/" + ending).replaceAll("//", '/');
+                pathInput.value = (rootSourcePath + "/Public/" + ending).replaceAll("//", '/');
             }
             else if (classType.value === 'private') {
-                pathInput.value = (defaultPath + "/Private/" + ending).replaceAll("//", '/');
+                pathInput.value = (rootSourcePath + "/Private/" + ending).replaceAll("//", '/');
             }
 
             updatePreviews();
@@ -370,15 +463,83 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
         classType.addEventListener('input', updateClassType);
 
+        document.getElementById('browseEnginePathBtn').addEventListener('click', () => {
+            vscode.postMessage({ command: 'browseEnginePath' });
+        });
+
+        projectType.addEventListener('input', () => {
+            vscode.postMessage({ command: 'updateProjectType', data: projectType.value });
+        });
+
+        document.getElementById('generateProjectBtn').addEventListener('click', () => {
+            vscode.postMessage({ command: 'generateProject' });
+        });
+
         vscode.postMessage({ command: 'webviewReady' });
     </script>
 </body>
 </html>`;
     }
 
+    private async browseEnginePath(webviewView: vscode.WebviewView) {
+        console.log("here");
+        let config = vscode.workspace.getConfiguration(extensionID)
+        var enginePath: string = config.get<string>('enginePath', '');
+        const engineFolderUri = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            openLabel: 'Select Unreal Engine Folder',
+            defaultUri: vscode.Uri.file(enginePath)
+        });
+
+        if (engineFolderUri && engineFolderUri[0]) {
+            enginePath = engineFolderUri[0].fsPath.replaceAll('\\', '/');
+            const buildToolPath = enginePath + '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe'
+            if (fs.existsSync(buildToolPath))
+            {
+                config.update('enginePath', enginePath);
+                webviewView.webview.postMessage({ 
+                    command: 'setEnginePath', 
+                    value: enginePath
+                });
+            }
+            else
+            {
+                vscode.window.showErrorMessage(`Could not find Unreal Engine Build Tool:  ${buildToolPath}`);
+            }
+        }
+    }
+
+    private async generateProject(webviewView: vscode.WebviewView) {
+        let config = vscode.workspace.getConfiguration(extensionID);
+        let projectPath: string | undefined = await this.findProjectFilePath();
+        let enginePath: string = config.get<string>('enginePath', '');
+        let projectType: ProjectType = config.get<string>('projectType', '') as ProjectType;
+        let projectArgs: string = UnrealBuildToolProjectTypeArg[projectType];
+
+        if (!projectPath)
+        {
+            vscode.window.showErrorMessage(`generateProject: Could not find the uproject here ${projectPath}`);
+            return;
+        }
+
+        if (!projectType)
+        {
+            console.error(`Please select a project type: ${projectType}`);
+            return;
+        }
+
+        const buildToolPath = (enginePath + '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe').replace(/\/+/g, '/');
+        const buildCommand = `& '${buildToolPath}' -Project='${projectPath}' ${projectArgs} -game -rocket`;
+
+        const terminal = vscode.window.createTerminal("Generating Unreal Project");
+        terminal.show();
+        terminal.sendText(buildCommand);
+    }
+
     private getCopyrightSetting(): string {
         // 1. Get the configuration object using your prefix
-        const config = vscode.workspace.getConfiguration('unrealClassCreator');
+        const config = vscode.workspace.getConfiguration(extensionID);
 
         // 2. Get the specific property. 
         // The second argument is a fallback if the setting is missing.
