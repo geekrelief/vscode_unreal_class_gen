@@ -4,8 +4,6 @@ import * as path from 'path';
 import {spawn} from 'child_process';
 
 const extensionID:string = "unrealClassCreator";
-//let myStatusBarItem: vscode.StatusBarItem;
-//var enginePath: string = vscode.workspace.getConfiguration(extensionID).get<string>('enginePath', '');
 
 export function activate(context: vscode.ExtensionContext) {
     // The ID must match the one in your package.json: "unrealClassCreatorPanel"
@@ -237,6 +235,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         button:hover { background: var(--vscode-button-hoverBackground); }
         .row { display: flex; gap: 4px; }
         #browseFilePathBtn, #browseEnginePathBtn { width: auto; margin-top: 0; }
+        #enginePath { flex: 1; }
         .gen-button { 
             border: 1px solid var(--vscode-button-border, #cccccc1f);
         }
@@ -320,7 +319,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         <div class="input-group">
             <label>Engine Location</label>
             <div class="row">
-                <input type="text" id="enginePathInput" placeholder="Select Unreal Engine folder...">
+                <div id="enginePath">Please select the Unreal Engine folder...</div>
                 <button id="browseEnginePathBtn">Browse</button>
             </div>
         </div>
@@ -347,7 +346,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         const headerLocation = document.getElementById('headerLocation');
         const cppLocation = document.getElementById('cppLocation');
         const headerOnlyCheckbox = document.getElementById('headerOnly');
-        const enginePath = document.getElementById('enginePathInput');
+        const enginePath = document.getElementById('enginePath');
         const projectType = document.getElementById('projectType');
 
         var rootSourcePath = "";
@@ -388,7 +387,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                 updatePreviews();
             }
             else if (message.command === 'setEnginePath' || message.command === 'initializeEnginePath') {
-                enginePathInput.value = message.value;
+                enginePath.textContent = message.value;
             }
             else if (message.command === 'initializeProjectType') {
                 projectType.value = message.value;
@@ -482,7 +481,6 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async browseEnginePath(webviewView: vscode.WebviewView) {
-        console.log("here");
         let config = vscode.workspace.getConfiguration(extensionID)
         var enginePath: string = config.get<string>('enginePath', '');
         const engineFolderUri = await vscode.window.showOpenDialog({
@@ -494,6 +492,10 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
         if (engineFolderUri && engineFolderUri[0]) {
             enginePath = engineFolderUri[0].fsPath.replaceAll('\\', '/');
+            if (path.basename(enginePath) === "Engine") // just get the root of the engine dir, if the user stepped inside it.
+            {
+                enginePath = path.dirname(enginePath)
+            }
             const buildToolPath = enginePath + '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe'
             if (fs.existsSync(buildToolPath))
             {
