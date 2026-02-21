@@ -23,3 +23,20 @@ You can customize the extension behavior in your VS Code settings:
 
 1. Open your VSCode Unreal workspace.
 3. Use the "Unreal Class Creator" icon in the Activity Bar to open the generator panel.
+
+
+### Development notes:
+npm run compile  - to compile
+npm run watch - to watch
+
+### Debug
+run with F5 
+open console command - Developer: Open Webview Developer Tools
+
+### Package: 
+update package.json version
+update CHANGELOG.md
+git tag -a "version" -m "version"
+git push origin
+git push origin --tags
+package command: vsce package
