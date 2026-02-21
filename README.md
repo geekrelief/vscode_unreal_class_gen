@@ -26,17 +26,18 @@ You can customize the extension behavior in your VS Code settings:
 
 
 ### Development notes:
-npm run compile  - to compile
-npm run watch - to watch
+  * npm run compile  - to compile
+  * npm run watch - to watch
 
 ### Debug
-run with F5 
-open console command - Developer: Open Webview Developer Tools
+  * run with F5 
+  * open console command - Developer: Open Webview Developer Tools
 
 ### Package: 
-update package.json version
-update CHANGELOG.md
-git tag -a "version" -m "version"
-git push origin
-git push origin --tags
-package command: vsce package
+  * update package.json version
+  * update CHANGELOG.md
+  * git tag -a "version" -m "version"
+  * git push origin
+  * git push origin --tags
+  * package command: vsce package
+  * create a new release on github
