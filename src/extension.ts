@@ -65,7 +65,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                     break;
 
                 case 'createFiles':
-                    const { className, parentClassName, headerPath, cppPath, headerIncludePath, isHeaderOnly } = message.data;
+                    const { className, parentClassName, parentHeaderPath, headerMapSetting, headerPath, cppPath, headerIncludePath, isHeaderOnly } = message.data;
 
                     const headerDir = path.dirname(headerPath);
                     if (!fs.existsSync(headerDir)) fs.mkdirSync(headerDir, { recursive: true });
@@ -74,6 +74,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                         return;
                     }
 
+                    this.updateClassHeader(parentClassName, parentHeaderPath, headerMapSetting);
                     const headerContent = this.generateHeader(className, parentClassName);
 
                     fs.writeFileSync(headerPath, headerContent);
@@ -119,6 +120,10 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
                 case 'generateProject':
                     this.generateProject(webviewView);
+                    break;
+
+                case 'getParentClassHeader':
+                    webviewView.webview.postMessage({command: 'setParentClassHeaderPreview', value: {location: this.getClassHeader(message.data), type: this.getClassHeaderType(message.data)}});
                     break;
 
                 case 'webviewReady':
@@ -234,6 +239,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         button { cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 12px; width: 100%; margin-top: 10px; }
         button:hover { background: var(--vscode-button-hoverBackground); }
         .row { display: flex; gap: 4px; }
+
         #browseFilePathBtn, #browseEnginePathBtn { width: auto; margin-top: 0; }
         #enginePath { flex: 1; }
         .gen-button { 
@@ -291,6 +297,17 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div class="input-group">
+            <label>Parent Header</label>
+            <div class="row">
+                <input type="text" id="parentHeaderLocation" placeholder="e.g. CoreMinimal.h">
+                <select id="headerMapSettingType">
+                    <option value="workspace">Workspace</option>
+                    <option value="global" selected>Global</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="input-group">
             <label>Storage Location</label>
             <div class="row">
                 <input type="text" id="pathInput" placeholder="Select folder...">
@@ -342,9 +359,12 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         
         const pathInput = document.getElementById('pathInput');
         const classNameInput = document.getElementById('className');
+        const parentClassNameInput = document.getElementById('parentClassName');
         const classType = document.getElementById('classType');
         const headerLocation = document.getElementById('headerLocation');
         const cppLocation = document.getElementById('cppLocation');
+        const parentHeaderLocation = document.getElementById('parentHeaderLocation');
+        const headerMapSettingType = document.getElementById('headerMapSettingType');
         const headerOnlyCheckbox = document.getElementById('headerOnly');
         const enginePath = document.getElementById('enginePath');
         const projectType = document.getElementById('projectType');
@@ -365,13 +385,15 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         document.getElementById('createFilesBtn').addEventListener('click', () => {
             const className = document.getElementById('className').value || "MyClass";
             const parentClassName = document.getElementById('parentClassName').value;
+            const parentHeaderPath = parentHeaderLocation.value;
+            const headerMapSetting = headerMapSettingType.value;
             const headerPath = headerLocation.textContent;
             const cppPath = cppLocation.textContent;
             const headerIncludePath = headerPath.split(rootSourcePath)[1].replace("Public/", "");
             const isHeaderOnly = headerOnlyCheckbox.checked;
             vscode.postMessage({
                 command: 'createFiles',
-                data: { className, parentClassName, headerPath, cppPath, headerIncludePath, isHeaderOnly }
+                data: { className, parentClassName, parentHeaderPath, headerMapSetting, headerPath, cppPath, headerIncludePath, isHeaderOnly }
             });
         });
 
@@ -391,6 +413,10 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             }
             else if (message.command === 'initializeProjectType') {
                 projectType.value = message.value;
+            }
+            else if (message.command === 'setParentClassHeaderPreview') {
+                parentHeaderLocation.value = message.value.location;
+                headerMapSettingType.value = message.value.type;
             }
         });
 
@@ -440,6 +466,18 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
+        function getParentClassHeader() {
+            const parentName = parentClassNameInput.value || "";
+            vscode.postMessage({ command: 'getParentClassHeader', data: parentName});
+        }
+
+        function updateParentClassHeader() {
+            const parentClass = parentClassNameInput.value || "";
+            const headerLocation = parentHeaderLocation.value || "";
+            const settingType = headerMapSettingType.value;
+            vscode.postMessage({ command: 'updateParentClassHeader', data: {parentClass: parentClass, headerLocation: headerLocation, settingType: settingType}});
+        }
+
         function updateClassType(){
             const base = pathInput.value;
             var ending = base.split(rootSourcePath)[1] || "";
@@ -459,6 +497,8 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         [pathInput, classNameInput].forEach(el => {
             el.addEventListener('input', updatePreviews);
         });
+
+        parentClassNameInput.addEventListener('input', getParentClassHeader);
 
         classType.addEventListener('input', updateClassType);
 
@@ -552,52 +592,50 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         return copyright.replace('${year}', currentYear);
     }
 
+    private getClassHeader(className: string): string {
+        const includeMap = vscode.workspace.getConfiguration(extensionID).inspect<Record<string, string>>('classHeaderMapping');
+        const gValue = includeMap?.globalValue ?? {};
+        const wsValue = includeMap?.workspaceValue ?? {};
+        return wsValue[className] || gValue[className] || `CoreMinimal.h`; // Fallback to CoreMinimal
+    }
+
+    private getClassHeaderType(className: string): string {
+        const includeMap = vscode.workspace.getConfiguration(extensionID).inspect<Record<string, string>>('classHeaderMapping');
+        const wsValue = includeMap?.workspaceValue ?? {};
+
+        return className in wsValue? "workspace" : "global";
+    }
+
+    private updateClassHeader(className: string, location: string, settingType: string)
+    {
+        const settingKey = 'classHeaderMapping';
+        var config = vscode.workspace.getConfiguration(extensionID);
+        var includeMap = config.inspect<Record<string, string>>(settingKey);
+        var wsMap = includeMap?.workspaceValue ?? {};
+        var globalMap = includeMap?.globalValue ?? {};
+        if (className in wsMap && settingType === 'global')
+        {
+            delete wsMap[className];
+        }
+        else if (className in globalMap && settingType === 'local')
+        {
+            delete globalMap[className];
+        }
+
+        if (settingType === 'workspace')
+        {
+            wsMap[className] = location;
+            config.update(settingKey, wsMap, vscode.ConfigurationTarget.Workspace);
+        }
+        else if (settingType === 'global')
+        {
+            globalMap[className] = location;
+            config.update(settingKey, globalMap, vscode.ConfigurationTarget.Global);
+        }
+    }
+
     private generateHeader(className: string, parentClassName: string): string {
-        // Basic include mapping for common classes
-        const includeMap: { [key: string]: string } = {
-            'UObject': 'CoreMinimal.h',
-            'AActor': 'GameFramework/Actor.h',
-            'APawn': 'GameFramework/Pawn.h',
-            'ACharacter': 'GameFramework/Character.h',
-            'APlayerController': 'GameFramework/PlayerController.h',
-            'AGameMode': 'GameFramework/GameMode.h',
-            'AGameModeBase': 'GameFramework/GameModeBase.h',
-            'AGameState': 'GameFramework/GameState.h',
-            'UGameInstance': 'Engine/GameInstance.h',
-            'UUserWidget': 'Blueprint/UserWidget.h',
-            'UActorComponent': 'Components/ActorComponent.h',
-            'USceneComponent': 'Components/SceneComponent.h',
-            'UStaticMeshComponent': 'Components/StaticMeshComponent.h',
-            'USkeletalMeshComponent': 'Components/SkeletalMeshComponent.h',
-            'AGameStateBase': 'GameFramework/GameStateBase.h',
-            'APlayerState': 'GameFramework/PlayerState.h',
-            'UCharacterMovementComponent': 'GameFramework/CharacterMovementComponent.h',
-            'UInterface': 'UObject/Interface.h',
-            'UDataAsset': 'Engine/DataAsset.h',
-            'UPrimaryDataAsset': 'Engine/DataAsset.h',
-            'UDataTable': 'Engine/DataTable.h',
-            'UCurveTable': 'Engine/CurveTable.h',
-            'USoundBase': 'Sound/SoundBase.h',
-            'UTexture2D': 'Engine/Texture2D.h',
-            'UCameraComponent': 'Camera/CameraComponent.h',
-            'USpringArmComponent': 'GameFramework/SpringArmComponent.h',
-            'UBoxComponent': 'Components/BoxComponent.h',
-            'USphereComponent': 'Components/SphereComponent.h',
-            'UCapsuleComponent': 'Components/CapsuleComponent.h',
-            'AAIController': 'AIController.h',
-            'UBehaviorTree': 'BehaviorTree/BehaviorTree.h',
-            'UBlackboardData': 'BehaviorTree/BlackboardData.h',
-            'UAnimInstance': 'Animation/AnimInstance.h',
-            'UWorld': 'Engine/World.h',
-            'USubsystem': 'Subsystems/Subsystem.h',
-            'UGameInstanceSubsystem': 'Subsystems/GameInstanceSubsystem.h',
-            'UWorldSubsystem': 'Subsystems/WorldSubsystem.h',
-            'ULocalPlayerSubsystem': 'Subsystems/LocalPlayerSubsystem.h',
-            'UInputComponent': 'Components/InputComponent.h',
-            'UEnhancedInputComponent': 'EnhancedInputComponent.h'
-        };
-        
-        const includeFile = includeMap[parentClassName] || `CoreMinimal.h`; // Fallback to CoreMinimal
+        const includeFile = this.getClassHeader(parentClassName);
         const prefixedClassName = parentClassName.length > 0 ? parentClassName[0] + className : '';
         const moduleAPI = this.moduleName.toUpperCase() + '_API';
         const classHeaderDecl = parentClassName.length > 0 
