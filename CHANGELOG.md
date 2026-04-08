@@ -1,3 +1,6 @@
+V1.4.1
+## Fix for codicons inclusion
+
 V1.4.0
 ## Added a button for the Parent Header, so the path can be saved to the settings. If new parent class is used, modify the parent header and click the edit icon to save it. Or if the setting type or path changes, those can be edited and saved too. Save before generating the new class to make sure the settings apply.
 
