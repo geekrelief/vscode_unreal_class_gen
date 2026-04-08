@@ -4,10 +4,12 @@ import * as path from 'path';
 import {spawn} from 'child_process';
 
 const extensionID:string = "unrealClassCreator";
+var extensionUri:vscode.Uri;
 
 export function activate(context: vscode.ExtensionContext) {
     // The ID must match the one in your package.json: "unrealClassCreatorPanel"
     const provider = new UnrealClassViewProvider(context.extensionUri);
+    extensionUri = context.extensionUri;
 
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('unrealClassCreatorPanel', provider)
@@ -57,8 +59,8 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                     });
                     if (folderUri && folderUri[0]) {
                         this.rootSourcePath = folderUri[0].fsPath.replaceAll('\\', '/');
-                        webviewView.webview.postMessage({ 
-                            command: 'setPath', 
+                        webviewView.webview.postMessage({
+                            command: 'setPath',
                             value: this.rootSourcePath
                         });
                     }
@@ -125,7 +127,20 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                 case 'getParentClassHeader':
                     webviewView.webview.postMessage({command: 'setParentClassHeaderPreview', value: {location: this.getClassHeader(message.data), type: this.getClassHeaderType(message.data)}});
                     break;
-
+                case 'getParentClassHeaderInfo':
+                    {
+                        const parentClassName = message.data;
+                        const curClassHeader = this.getClassHeader(parentClassName)
+                        const curMapSetting = this.getClassHeaderType(parentClassName);
+                        webviewView.webview.postMessage({command: 'validateParentClassHeaderInfo', value: {location: curClassHeader, type: curMapSetting}});
+                    }
+                    break;
+                case 'updateParentClassHeader':
+                    {
+                        const {parentClassName, headerLocation, settingType} = message.data;
+                        this.updateClassHeader(parentClassName, headerLocation, settingType);
+                    }
+                    break;
                 case 'webviewReady':
                     this.initalizeDefaultPath(webviewView);
                     break;
@@ -142,7 +157,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async findProjectFilePath(): Promise<string | undefined> {
-        try{ 
+        try{
             const files = await fs.promises.readdir(this.getRootPath());
             const uprojectFilename = files.find(f => f.endsWith('.uproject'));
             if (uprojectFilename){
@@ -204,31 +219,33 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
     private _getHtmlForWebview(webview: vscode.Webview) {
         const nonce = getNonce();
+        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="${codiconsUri}" rel="stylesheet" />
     <style>
         body { padding: 12px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.4; }
         .input-group { margin-bottom: 12px; }
         label { display: block; margin-bottom: 5px; font-weight: normal; color: var(--vscode-input-foreground); opacity: 0.9;}
 
-        input { 
-            width: 100%; 
-            box-sizing: border-box; 
-            background: var(--vscode-input-background); 
-            color: var(--vscode-input-foreground); 
-            border: 1px solid var(--vscode-input-border, transparent); 
-            padding: 4px 6px; 
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border, transparent);
+            padding: 4px 6px;
             outline-offset: -1px;
         }
 
         /* Native-style focus border */
         .form-section {
-            margin-top: 25px; 
-            padding: 10px; 
+            margin-top: 25px;
+            padding: 10px;
             border: 1px solid #cccccc1f;
             border-radius: 4px;
         }
@@ -238,11 +255,15 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         input::selection { background-color: var(--vscode-selection-background) !important; }
         button { cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 12px; width: 100%; margin-top: 10px; }
         button:hover { background: var(--vscode-button-hoverBackground); }
-        .row { display: flex; gap: 4px; }
+        .row { display: flex; align-items: stretch; gap: 4px; }
 
-        #browseFilePathBtn, #browseEnginePathBtn { width: auto; margin-top: 0; }
+        #updateParentHeaderLocationBtn { width: auto; margin: 0; }
+        #updateParentHeaderLocationBtn:disabled { color: var(--vscode-disabledForeground); opacity: 0.6; cursor: default; background-color: transparent; }
+
+        #browseFilePathBtn, #browseEnginePathBtn { width: auto; margin: 0; }
+
         #enginePath { flex: 1; }
-        .gen-button { 
+        .gen-button {
             border: 1px solid var(--vscode-button-border, #cccccc1f);
         }
         .footer-row {
@@ -300,6 +321,9 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             <label>Parent Header</label>
             <div class="row">
                 <input type="text" id="parentHeaderLocation" placeholder="e.g. CoreMinimal.h">
+                <button id="updateParentHeaderLocationBtn" disabled title="Update the parent header location in the settings" class="icon-button">
+                    <span id="updateParentHeaderLocationIcon" class="codicon codicon-edit"></span>
+                </button>
                 <select id="headerMapSettingType">
                     <option value="workspace">Workspace</option>
                     <option value="global" selected>Global</option>
@@ -356,7 +380,8 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
 
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
-        
+
+        // file gen
         const pathInput = document.getElementById('pathInput');
         const classNameInput = document.getElementById('className');
         const parentClassNameInput = document.getElementById('parentClassName');
@@ -366,59 +391,8 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         const parentHeaderLocation = document.getElementById('parentHeaderLocation');
         const headerMapSettingType = document.getElementById('headerMapSettingType');
         const headerOnlyCheckbox = document.getElementById('headerOnly');
-        const enginePath = document.getElementById('enginePath');
-        const projectType = document.getElementById('projectType');
 
         var rootSourcePath = "";
-        document.getElementById('browseFilePathBtn').addEventListener('click', () => {
-            vscode.postMessage({ command: 'browseFilePath' });
-        });
-
-        headerOnlyCheckbox.addEventListener('change', () => {
-            if (headerOnlyCheckbox.checked) {
-                cppLocation.classList.add('strikethrough');
-            } else {
-                cppLocation.classList.remove('strikethrough');
-            }
-        });
-
-        document.getElementById('createFilesBtn').addEventListener('click', () => {
-            const className = document.getElementById('className').value || "MyClass";
-            const parentClassName = document.getElementById('parentClassName').value;
-            const parentHeaderPath = parentHeaderLocation.value;
-            const headerMapSetting = headerMapSettingType.value;
-            const headerPath = headerLocation.textContent;
-            const cppPath = cppLocation.textContent;
-            const headerIncludePath = headerPath.split(rootSourcePath)[1].replace("Public/", "");
-            const isHeaderOnly = headerOnlyCheckbox.checked;
-            vscode.postMessage({
-                command: 'createFiles',
-                data: { className, parentClassName, parentHeaderPath, headerMapSetting, headerPath, cppPath, headerIncludePath, isHeaderOnly }
-            });
-        });
-
-        window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'setPath') {
-                document.getElementById('pathInput').value = message.value;
-                updatePreviews();
-            }
-            else if (message.command === 'initializeDefaultPath') {
-                document.getElementById('pathInput').value = message.value;
-                rootSourcePath = message.value;
-                updatePreviews();
-            }
-            else if (message.command === 'setEnginePath' || message.command === 'initializeEnginePath') {
-                enginePath.textContent = message.value;
-            }
-            else if (message.command === 'initializeProjectType') {
-                projectType.value = message.value;
-            }
-            else if (message.command === 'setParentClassHeaderPreview') {
-                parentHeaderLocation.value = message.value.location;
-                headerMapSettingType.value = message.value.type;
-            }
-        });
 
         function updatePreviews() {
             const base = pathInput.value || rootSourcePath;
@@ -471,6 +445,11 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             vscode.postMessage({ command: 'getParentClassHeader', data: parentName});
         }
 
+        function getParentClassHeaderInfo() {
+            const parentName = parentClassNameInput.value || "";
+            vscode.postMessage({ command: 'getParentClassHeaderInfo', data: parentName});
+        }
+
         function updateParentClassHeader() {
             const parentClass = parentClassNameInput.value || "";
             const headerLocation = parentHeaderLocation.value || "";
@@ -499,8 +478,71 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         });
 
         parentClassNameInput.addEventListener('input', getParentClassHeader);
+        parentHeaderLocation.addEventListener('input', getParentClassHeaderInfo);
+        headerMapSettingType.addEventListener('change', getParentClassHeaderInfo);
+        document.getElementById('updateParentHeaderLocationBtn').addEventListener('click', updateParentClassHeader);
 
         classType.addEventListener('input', updateClassType);
+
+        document.getElementById('browseFilePathBtn').addEventListener('click', () => {
+            vscode.postMessage({ command: 'browseFilePath' });
+        });
+
+        headerOnlyCheckbox.addEventListener('change', () => {
+            if (headerOnlyCheckbox.checked) {
+                cppLocation.classList.add('strikethrough');
+            } else {
+                cppLocation.classList.remove('strikethrough');
+            }
+        });
+
+        document.getElementById('createFilesBtn').addEventListener('click', () => {
+            const className = document.getElementById('className').value || "MyClass";
+            const parentClassName = document.getElementById('parentClassName').value;
+            const parentHeaderPath = parentHeaderLocation.value;
+            const headerMapSetting = headerMapSettingType.value;
+            const headerPath = headerLocation.textContent;
+            const cppPath = cppLocation.textContent;
+            const headerIncludePath = headerPath.split(rootSourcePath)[1].replace("Public/", "");
+            const isHeaderOnly = headerOnlyCheckbox.checked;
+            vscode.postMessage({
+                command: 'createFiles',
+                data: { className, parentClassName, parentHeaderPath, headerMapSetting, headerPath, cppPath, headerIncludePath, isHeaderOnly }
+            });
+        });
+
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'setPath') {
+                document.getElementById('pathInput').value = message.value;
+                updatePreviews();
+            }
+            else if (message.command === 'initializeDefaultPath') {
+                document.getElementById('pathInput').value = message.value;
+                rootSourcePath = message.value;
+                updatePreviews();
+            }
+            else if (message.command === 'setEnginePath' || message.command === 'initializeEnginePath') {
+                enginePath.textContent = message.value;
+            }
+            else if (message.command === 'initializeProjectType') {
+                projectType.value = message.value;
+            }
+            else if (message.command === 'setParentClassHeaderPreview') {
+                parentHeaderLocation.value = message.value.location;
+                headerMapSettingType.value = message.value.type;
+                updateParentHeaderLocationBtn.disabled = true;
+            }
+            else if (message.command === 'validateParentClassHeaderInfo') {
+                updateParentHeaderLocationBtn.disabled = (parentHeaderLocation.value === message.value.location && headerMapSettingType.value === message.value.type);
+            }
+        });
+        //end file gen
+
+
+        // project gen
+        const enginePath = document.getElementById('enginePath');
+        const projectType = document.getElementById('projectType');
 
         document.getElementById('browseEnginePathBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'browseEnginePath' });
@@ -513,6 +555,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         document.getElementById('generateProjectBtn').addEventListener('click', () => {
             vscode.postMessage({ command: 'generateProject' });
         });
+        // end project gen
 
         vscode.postMessage({ command: 'webviewReady' });
     </script>
@@ -540,8 +583,8 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             if (fs.existsSync(buildToolPath))
             {
                 config.update('enginePath', enginePath);
-                webviewView.webview.postMessage({ 
-                    command: 'setEnginePath', 
+                webviewView.webview.postMessage({
+                    command: 'setEnginePath',
                     value: enginePath
                 });
             }
@@ -583,7 +626,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         // 1. Get the configuration object using your prefix
         const config = vscode.workspace.getConfiguration(extensionID);
 
-        // 2. Get the specific property. 
+        // 2. Get the specific property.
         // The second argument is a fallback if the setting is missing.
         const copyright = config.get<string>('copyrightText', '');
 
@@ -638,8 +681,8 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         const includeFile = this.getClassHeader(parentClassName);
         const prefixedClassName = parentClassName.length > 0 ? parentClassName[0] + className : '';
         const moduleAPI = this.moduleName.toUpperCase() + '_API';
-        const classHeaderDecl = parentClassName.length > 0 
-            ? `class ${moduleAPI} ${prefixedClassName} : public ${parentClassName}` 
+        const classHeaderDecl = parentClassName.length > 0
+            ? `class ${moduleAPI} ${prefixedClassName} : public ${parentClassName}`
             : `class ${moduleAPI} ${className}`;
         const copyright = this.getCopyrightSetting();
         return `// ${copyright}
@@ -714,7 +757,7 @@ ${classHeaderDecl}
             ccModuleJson.push(newModuleEntry);
             fs.writeFileSync(path.join(this.getRootPath(), '.vscode', `compileCommands_${this.moduleName}.json`), JSON.stringify(ccModuleJson, null, '\t'), 'utf-8');
             //console.log(`Added entry for ${filePath} to compileCommands_${this.moduleName}.json`);
-        } 
+        }
         // else {
         //     console.log(`Entry already exists in compileCommands_${this.moduleName}.json`);
         // }
