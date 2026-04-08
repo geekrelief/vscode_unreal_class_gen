@@ -137,8 +137,11 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'updateParentClassHeader':
                     {
-                        const {parentClassName, headerLocation, settingType} = message.data;
-                        this.updateClassHeader(parentClassName, headerLocation, settingType);
+                        const {parentClass, headerLocation, settingType} = message.data;
+                        console.log("updateParentClassHeader " + parentClass );
+                        console.log("updateParentClassHeader " + headerLocation );
+                        console.log("updateParentClassHeader " + settingType );
+                        this.updateClassHeader(parentClass, headerLocation, settingType);
                     }
                     break;
                 case 'webviewReady':
@@ -454,6 +457,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             const parentClass = parentClassNameInput.value || "";
             const headerLocation = parentHeaderLocation.value || "";
             const settingType = headerMapSettingType.value;
+            console.log('updateParentClassHeader ' + parentClassNameInput.value);
             vscode.postMessage({ command: 'updateParentClassHeader', data: {parentClass: parentClass, headerLocation: headerLocation, settingType: settingType}});
         }
 
