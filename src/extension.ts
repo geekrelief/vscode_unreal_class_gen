@@ -76,7 +76,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                         return;
                     }
 
-                    this.updateClassHeader(parentClassName, parentHeaderPath, headerMapSetting);
+                    await this.updateClassHeader(parentClassName, parentHeaderPath, headerMapSetting);
                     const headerContent = this.generateHeader(className, parentClassName);
 
                     fs.writeFileSync(headerPath, headerContent);
@@ -129,19 +129,20 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'getParentClassHeaderInfo':
                     {
-                        const parentClassName = message.data;
-                        const curClassHeader = this.getClassHeader(parentClassName)
-                        const curMapSetting = this.getClassHeaderType(parentClassName);
+                        const parentClass = message.data;
+                        const curClassHeader = this.getClassHeader(parentClass)
+                        const curMapSetting = this.getClassHeaderType(parentClass);
                         webviewView.webview.postMessage({command: 'validateParentClassHeaderInfo', value: {location: curClassHeader, type: curMapSetting}});
                     }
                     break;
                 case 'updateParentClassHeader':
                     {
                         const {parentClass, headerLocation, settingType} = message.data;
-                        console.log("updateParentClassHeader " + parentClass );
-                        console.log("updateParentClassHeader " + headerLocation );
-                        console.log("updateParentClassHeader " + settingType );
-                        this.updateClassHeader(parentClass, headerLocation, settingType);
+                        await this.updateClassHeader(parentClass, headerLocation, settingType);
+
+                        const curClassHeader = this.getClassHeader(parentClass)
+                        const curMapSetting = this.getClassHeaderType(parentClass);
+                        webviewView.webview.postMessage({command: 'validateParentClassHeaderInfo', value: {location: curClassHeader, type: curMapSetting}});
                     }
                     break;
                 case 'webviewReady':
@@ -457,7 +458,6 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             const parentClass = parentClassNameInput.value || "";
             const headerLocation = parentHeaderLocation.value || "";
             const settingType = headerMapSettingType.value;
-            console.log('updateParentClassHeader ' + parentClassNameInput.value);
             vscode.postMessage({ command: 'updateParentClassHeader', data: {parentClass: parentClass, headerLocation: headerLocation, settingType: settingType}});
         }
 
@@ -653,7 +653,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         return className in wsValue? "workspace" : "global";
     }
 
-    private updateClassHeader(className: string, location: string, settingType: string)
+    private async updateClassHeader(className: string, location: string, settingType: string)
     {
         const settingKey = 'classHeaderMapping';
         var config = vscode.workspace.getConfiguration(extensionID);
@@ -664,7 +664,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         {
             delete wsMap[className];
         }
-        else if (className in globalMap && settingType === 'local')
+        else if (className in globalMap && settingType === 'workspace')
         {
             delete globalMap[className];
         }
@@ -672,13 +672,13 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
         if (settingType === 'workspace')
         {
             wsMap[className] = location;
-            config.update(settingKey, wsMap, vscode.ConfigurationTarget.Workspace);
         }
         else if (settingType === 'global')
         {
             globalMap[className] = location;
-            config.update(settingKey, globalMap, vscode.ConfigurationTarget.Global);
         }
+        await config.update(settingKey, wsMap, vscode.ConfigurationTarget.Workspace);
+        await config.update(settingKey, globalMap, vscode.ConfigurationTarget.Global);
     }
 
     private generateHeader(className: string, parentClassName: string): string {

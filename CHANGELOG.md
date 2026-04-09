@@ -1,4 +1,4 @@
-V1.4.2
+V1.4.3
 ## Added a button for the Parent Header, so the path can be saved to the settings. If new parent class is used, modify the parent header and click the edit icon to save it. Or if the setting type or path changes, those can be edited and saved too. Save before generating the new class to make sure the settings apply.
 
 V1.3.0
