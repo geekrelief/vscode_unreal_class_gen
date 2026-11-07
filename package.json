@@ -2,7 +2,7 @@
   "name": "unreal-class-creator",
   "displayName": "Unreal Class Creator",
   "description": "Adds new C++ classes for Unreal Engine via a custom UI and can regenerate the project without the editor.",
-  "version": "1.4.3",
+  "version": "1.4.5",
   "publisher": "geekrelief",
   "icon": "resources/icon.png",
   "repository": {
@@ -41,7 +41,7 @@
         "unrealClassCreator.projectType": {
           "type": "string",
           "default": "VSCode",
-          "description": "The type of project to generate (VisualStudio solution, VSCode workspace)."
+          "description": "The type of project to generate (vs2026: VisualStudio solution, vscode: VSCode workspace)."
         },
         "unrealClassCreator.classHeaderMapping": {
           "type": "object",

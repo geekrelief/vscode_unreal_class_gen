@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import {spawn} from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 const extensionID:string = "unrealClassCreator";
 var extensionUri:vscode.Uri;
@@ -458,7 +461,7 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             const parentClass = parentClassNameInput.value || "";
             const headerLocation = parentHeaderLocation.value || "";
             const settingType = headerMapSettingType.value;
-            vscode.postMessage({ command: 'updateParentClassHeader', data: {parentClass: parentClass, headerLocation: headerLocation, settingType: settingType}});
+            vscode.postMessage({ command: 'updateParentClassHeader', data: {parentClass, headerLocation, settingType}});
         }
 
         function updateClassType(){
@@ -467,12 +470,13 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
             ending = ending.replace("Public/", "").replace("Private/", "");
 
             if (classType.value === 'public') {
-                pathInput.value = (rootSourcePath + "/Public/" + ending).replaceAll("//", '/');
+                pathInput.value = (rootSourcePath + "/Public/" + ending);
             }
             else if (classType.value === 'private') {
-                pathInput.value = (rootSourcePath + "/Private/" + ending).replaceAll("//", '/');
+                pathInput.value = (rootSourcePath + "/Private/" + ending);
             }
 
+            pathInput.value = pathInput.value.replaceAll("//", '/');
             updatePreviews();
         }
 
@@ -600,30 +604,94 @@ class UnrealClassViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async generateProject(webviewView: vscode.WebviewView) {
-        let config = vscode.workspace.getConfiguration(extensionID);
-        let projectPath: string | undefined = await this.findProjectFilePath();
-        let enginePath: string = config.get<string>('enginePath', '');
-        let projectType: ProjectType = config.get<string>('projectType', '') as ProjectType;
-        let projectArgs: string = UnrealBuildToolProjectTypeArg[projectType];
+        const config = vscode.workspace.getConfiguration(extensionID);
 
-        if (!projectPath)
-        {
-            vscode.window.showErrorMessage(`generateProject: Could not find the uproject here ${projectPath}`);
+        const projectPath: string | undefined = await this.findProjectFilePath();
+        const enginePath: string = config.get<string>('enginePath', '');
+        const projectType: ProjectType = config.get<string>('projectType', '') as ProjectType;
+
+        if (!projectPath) {
+            vscode.window.showErrorMessage(
+                'generateProject: Could not find the .uproject file.'
+            );
             return;
         }
 
-        if (!projectType)
-        {
+        if (!projectType) {
             console.error(`Please select a project type: ${projectType}`);
             return;
         }
 
-        const buildToolPath = (enginePath + '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe').replace(/\/+/g, '/');
-        const buildCommand = `& '${buildToolPath}' -Project='${projectPath}' ${projectArgs} -game -rocket`;
+        const workspaceFile = vscode.workspace.workspaceFile;
 
-        const terminal = vscode.window.createTerminal("Generating Unreal Project");
-        terminal.show();
-        terminal.sendText(buildCommand);
+        if (!workspaceFile) {
+            vscode.window.showErrorMessage(
+                'No .code-workspace file is currently open.'
+            );
+            return;
+        }
+
+        const buildToolPath = (
+            enginePath + '/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe'
+        ).replace(/\/+/g, '/');
+
+        const args = [
+            `-Project=${projectPath}`,
+            UnrealBuildToolProjectTypeArg[projectType],
+            '-game',
+            '-rocket',
+            '-nodotnet'
+        ];
+
+        try {
+            vscode.window.showInformationMessage(
+                'Generating Unreal project files...'
+            );
+
+            const { stdout, stderr } = await execFileAsync(
+                buildToolPath,
+                args,
+                {
+                    cwd: enginePath,
+                    windowsHide: true,
+                    maxBuffer: 50 * 1024 * 1024
+                }
+            );
+
+            if (stdout) {
+                console.log(stdout);
+            }
+
+            if (stderr) {
+                console.warn(stderr);
+            }
+
+            // UBT has exited successfully. Update the workspace setting.
+            await vscode.workspace
+                .getConfiguration('dotnet')
+                .update(
+                    'defaultSolution',
+                    'disable',
+                    vscode.ConfigurationTarget.Workspace
+                );
+
+            // Open the updated workspace file.
+            const document = await vscode.workspace.openTextDocument(workspaceFile);
+            await vscode.window.showTextDocument(document);
+
+            vscode.window.showInformationMessage(
+                'Unreal project generation completed. Workspace setting updated.'
+            );
+
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+
+            console.error('Unreal project generation failed:', error);
+
+            vscode.window.showErrorMessage(
+                `Unreal project generation failed: ${message}`
+            );
+        }
     }
 
     private getCopyrightSetting(): string {
